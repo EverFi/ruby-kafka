@@ -83,7 +83,7 @@ jobs:
 
       - run:
           command: |
-            GEM_VERSION=`ruby -r./lib/foundry/message_bus/version.rb -e "puts Kafka::VERSION"`
+            GEM_VERSION=`ruby -r./lib/kafka/version.rb -e "puts Kafka::VERSION"`
             if [ "$CIRCLE_TAG" = "v$GEM_VERSION" ]
             then
               curl \
