@@ -58,6 +58,42 @@ module Kafka
   #     # Remember to shut down the producer when you're done with it.
   #     producer.shutdown
   #
+  # ## Handling Delivery Failures
+  #
+  # By default, if the producer is unable to deliver any messages to the Kafka
+  # Broker(s) (i.e. the underlying `sync_producer` raises a
+  # {Kafka::DeliveryFailed} error), the `AsyncProducer` will simply log the
+  # error and continue; the failed messages will remain in the producer's
+  # buffer, and it will attempt to send them again the next time the producer is
+  # instructed to deliver messages. This behavior can sometimes be problematic,
+  # because if you run into a situation where the buffer fills up with messages
+  # that—possibly due to a bug somewhere in either the message production or on
+  # the Broker—can never be delivered successfully, then the application will
+  # start dropping messages or crashing due to the buffer overflow errors, and
+  # the producer's buffer will never clear out until the process is restarted,
+  # thus completely losing all messages in the buffer.
+  #
+  # You may, however, provide custom delivery failure handling by passing in a
+  # `delivery_failure_handler` when constructing the AsyncProducer. The handler
+  # must be an object (such as a {Proc}) that provides a `#call` method taking
+  # three arguments: an error message ({String}), an array of the messages that
+  # could not be delivered, and the underlying {Kafka::Producer} instance. Then,
+  # when a {Kafka::DeliveryFailed} error is encountered, this handler will run
+  # before handing control back to the AsyncProducer instance. This allows you
+  # to perform any custom handling of the failed messages and—if
+  # appropriate—clear the producer's buffer, so that it can accept further
+  # messages.
+  #
+  # ### Example of DeliveryFailed handling
+  #
+  #     handler = ->(error, messages, producer) {
+  #       logger.info "Handling messages that failed to deliver due to: #{error}"
+  #       producer.clear_buffer
+  #       do_something_with(messages)
+  #     }
+  #
+  #     producer = kafka.async_producer(delivery_failure_handler: handler)
+  #
   class AsyncProducer
     THREAD_MUTEX = Mutex.new
 
@@ -71,8 +107,13 @@ module Kafka
     #   buffered messages that will automatically trigger a delivery.
     # @param delivery_interval [Integer] if greater than zero, the number of
     #   seconds between automatic message deliveries.
+    # @param delivery_failure_handler [#call(<String>, <Array>, <Kafka::Producer>)]
+    #   Accepts a {Proc} or any other object that responds to `#call`. This
+    #   object is used as a callback to handle the case where the
+    #   `sync_producer` is unable to deliver the messages to the Kafka Broker(s)
+    #   and raises a {Kafka::DeliveryFailed} error.
     #
-    def initialize(sync_producer:, max_queue_size: 1000, delivery_threshold: 0, delivery_interval: 0, instrumenter:, logger:)
+    def initialize(sync_producer:, max_queue_size: 1000, delivery_threshold: 0, delivery_interval: 0, instrumenter:, logger:, delivery_failure_handler: ->(_reason, _messages, _sync_producer) { })
       raise ArgumentError unless max_queue_size > 0
       raise ArgumentError unless delivery_threshold >= 0
       raise ArgumentError unless delivery_interval >= 0
@@ -88,6 +129,7 @@ module Kafka
         delivery_threshold: delivery_threshold,
         instrumenter: instrumenter,
         logger: logger,
+        delivery_failure_handler: delivery_failure_handler
       )
 
       # The timer will no-op if the delivery interval is zero.
@@ -184,12 +226,13 @@ module Kafka
     end
 
     class Worker
-      def initialize(queue:, producer:, delivery_threshold:, instrumenter:, logger:)
+      def initialize(queue:, producer:, delivery_threshold:, instrumenter:, logger:, delivery_failure_handler:)
         @queue = queue
         @producer = producer
         @delivery_threshold = delivery_threshold
         @instrumenter = instrumenter
         @logger = logger
+        @delivery_failure_handler = delivery_failure_handler
       end
 
       def run
@@ -247,9 +290,14 @@ module Kafka
       def deliver_messages
         @producer.deliver_messages
       rescue DeliveryFailed, ConnectionError => e
-        # Failed to deliver messages -- nothing to do but log and try again later.
         @logger.error("Failed to asynchronously deliver messages: #{e.message}")
         @instrumenter.instrument("error.async_producer", { error: e })
+        handle_delivery_failure(e)
+      end
+
+      def handle_delivery_failure(error)
+        return unless error.respond_to?(:failed_messages)
+        @delivery_failure_handler.call(error.message, error.failed_messages, @producer)
       end
 
       def threshold_reached?

@@ -292,10 +292,15 @@ module Kafka
     #   buffered messages that will automatically trigger a delivery.
     # @param delivery_interval [Integer] if greater than zero, the number of
     #   seconds between automatic message deliveries.
+    # @param delivery_failure_handler [#call(<String>, <Array>, <Kafka::Producer>)]
+    #   Accepts a {Proc} or any other object that responds to `#call`. This
+    #   object is used as a callback to handle the case where the
+    #   `sync_producer` is unable to deliver the messages to the Kafka Broker(s)
+    #   and raises a {Kafka::DeliveryFailed} error.
     #
     # @see AsyncProducer
     # @return [AsyncProducer]
-    def async_producer(delivery_interval: 0, delivery_threshold: 0, max_queue_size: 1000, **options)
+    def async_producer(delivery_interval: 0, delivery_threshold: 0, max_queue_size: 1000, delivery_failure_handler: ->(_error, _messages, _producer) {}, **options)
       sync_producer = producer(**options)
 
       AsyncProducer.new(
@@ -305,6 +310,7 @@ module Kafka
         max_queue_size: max_queue_size,
         instrumenter: @instrumenter,
         logger: @logger,
+        delivery_failure_handler: delivery_failure_handler
       )
     end
 
