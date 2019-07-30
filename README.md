@@ -424,6 +424,7 @@ Compression is enabled by passing the `compression_codec` parameter to `#produce
 * `:snappy` for [Snappy](http://google.github.io/snappy/) compression.
 * `:gzip` for [gzip](https://en.wikipedia.org/wiki/Gzip) compression.
 * `:lz4` for [LZ4](https://en.wikipedia.org/wiki/LZ4_(compression_algorithm)) compression.
+* `:zstd` for [zstd](https://facebook.github.io/zstd/) compression.
 
 By default, all message sets will be compressed if you specify a compression codec. To increase the compression threshold, set `compression_threshold` to an integer value higher than one.
 
@@ -985,6 +986,26 @@ kafka = Kafka.new(
   sasl_scram_password: 'password',
   sasl_scram_mechanism: 'sha256',
   # ...
+)
+```
+
+##### OAUTHBEARER
+This mechanism is supported in kafka >= 2.0.0 as of [KIP-255](https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=75968876)
+
+In order to authenticate using OAUTHBEARER, you must set the client with an instance of a class that implements a `token` method (the interface is described in [Kafka::Sasl::OAuth](lib/kafka/sasl/oauth.rb)) which returns an ID/Access token.
+
+Optionally, the client may implement an `extensions` method that returns a map of key-value pairs. These can be sent with the SASL/OAUTHBEARER initial client response. This is only supported in kafka >= 2.1.0.
+
+```ruby
+class TokenProvider
+  def token
+    "some_id_token"
+  end
+end
+# ...
+client = Kafka.new(
+  ["kafka1:9092"],
+  sasl_oauth_token_provider: TokenProvider.new
 )
 ```
 

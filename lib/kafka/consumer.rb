@@ -46,7 +46,7 @@ module Kafka
 
     def initialize(cluster:, logger:, instrumenter:, group:, fetcher:, offset_manager:, session_timeout:, heartbeat:)
       @cluster = cluster
-      @logger = logger
+      @logger = TaggedLogger.new(logger)
       @instrumenter = instrumenter
       @group = group
       @offset_manager = offset_manager
@@ -246,7 +246,7 @@ module Kafka
 
             trigger_heartbeat
 
-            return if !@running
+            return if shutting_down?
           end
 
           # We've successfully processed a batch from the partition, so we can clear
@@ -285,6 +285,9 @@ module Kafka
     #   without an exception. Once marked successful, the offsets of processed
     #   messages can be committed to Kafka.
     # @yieldparam batch [Kafka::FetchedBatch] a message batch fetched from Kafka.
+    # @raise [Kafka::ProcessingError] if there was an error processing a batch.
+    #   The original exception will be returned by calling `#cause` on the
+    #   {Kafka::ProcessingError} instance.
     # @return [nil]
     def each_batch(min_bytes: 1, max_bytes: 10485760, max_wait_time: 1, automatically_mark_as_processed: true)
       @fetcher.configure(
@@ -341,7 +344,7 @@ module Kafka
 
           trigger_heartbeat
 
-          return if !@running
+          return if shutting_down?
         end
 
         # We may not have received any messages, but it's still a good idea to
@@ -391,22 +394,23 @@ module Kafka
 
     def consumer_loop
       @running = true
+      @logger.push_tags(@group.to_s)
 
       @fetcher.start
 
-      while @running
+      while running?
         begin
           @instrumenter.instrument("loop.consumer") do
             yield
           end
         rescue HeartbeatError
           make_final_offsets_commit!
-          join_group
+          join_group if running?
         rescue OffsetCommitError
-          join_group
+          join_group if running?
         rescue RebalanceInProgress
           @logger.warn "Group rebalance in progress, re-joining..."
-          join_group
+          join_group if running?
         rescue FetchError, NotLeaderForPartition, UnknownTopicOrPartition
           @cluster.mark_as_stale!
         rescue LeaderNotAvailable => e
@@ -429,6 +433,7 @@ module Kafka
       make_final_offsets_commit!
       @group.leave rescue nil
       @running = false
+      @logger.pop_tags
     end
 
     def make_final_offsets_commit!(attempts = 3)
@@ -510,7 +515,7 @@ module Kafka
 
     def fetch_batches
       # Return early if the consumer has been stopped.
-      return [] if !@running
+      return [] if shutting_down?
 
       join_group unless @group.member?
 
@@ -548,6 +553,14 @@ module Kafka
 
     def pause_for(topic, partition)
       @pauses[topic][partition]
+    end
+
+    def running?
+      @running
+    end
+
+    def shutting_down?
+      !running?
     end
 
     def clear_current_offsets(excluding: {})
