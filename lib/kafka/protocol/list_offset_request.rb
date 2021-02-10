@@ -37,7 +37,7 @@ module Kafka
 
       def encode(encoder)
         encoder.write_int32(@replica_id)
-        encoder.write_int8(ISOLATION_READ_COMMITTED)
+        encoder.write_int8(ISOLATION_READ_UNCOMMITTED)
 
         encoder.write_array(@topics) do |topic, partitions|
           encoder.write_string(topic)

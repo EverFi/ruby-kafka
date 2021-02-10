@@ -4,18 +4,11 @@ require "kafka/datadog"
 require "fake_datadog_agent"
 
 describe Kafka::Datadog do
-  let(:agent) { FakeDatadogAgent.new }
-
-  before do
-    agent.start
-  end
-
-  after do
-    agent.stop
-  end
-
   context "when host and port are specified" do
     it "emits metrics to the Datadog agent" do
+      agent = FakeDatadogAgent.new
+      agent.start
+      Kafka::Datadog.socket_path = nil
       Kafka::Datadog.host = agent.host
       Kafka::Datadog.port = agent.port
 
@@ -30,12 +23,17 @@ describe Kafka::Datadog do
       metric = agent.metrics.first
 
       expect(metric).to eq "ruby_kafka.greetings"
+      agent.stop
     end
   end
 
   context "when socket_path is specified" do
     it "emits metrics to the Datadog agent" do
+      agent = FakeDatadogAgent.new
+      agent.start
       Kafka::Datadog.socket_path = agent.socket_path
+      Kafka::Datadog.host = nil
+      Kafka::Datadog.port = nil
 
       client = Kafka::Datadog.statsd
 
@@ -48,6 +46,7 @@ describe Kafka::Datadog do
       metric = agent.metrics.first
 
       expect(metric).to eq "ruby_kafka.greetings"
+      agent.stop
     end
   end
 end

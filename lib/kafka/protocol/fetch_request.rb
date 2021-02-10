@@ -50,7 +50,7 @@ module Kafka
         encoder.write_int32(@max_wait_time)
         encoder.write_int32(@min_bytes)
         encoder.write_int32(@max_bytes)
-        encoder.write_int8(ISOLATION_READ_COMMITTED)
+        encoder.write_int8(ISOLATION_READ_UNCOMMITTED)
 
         encoder.write_array(@topics) do |topic, partitions|
           encoder.write_string(topic)
