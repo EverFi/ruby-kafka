@@ -12,7 +12,9 @@ describe Kafka::SocketWithTimeout, ".open" do
 
     expect {
       Kafka::SocketWithTimeout.new(host, port, connect_timeout: timeout, timeout: 1)
-    }.to raise_exception(Errno::ETIMEDOUT)
+    }.to raise_exception(SystemCallError) { |exception|
+      expect([Errno::ETIMEDOUT, Errno::ECONNREFUSED, Errno::ENETUNREACH]).to include(exception.class)
+    }
 
     finish = Time.now
 
